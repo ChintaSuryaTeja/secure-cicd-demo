@@ -14,14 +14,15 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      # 🧩 Step 1: Checkout code
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # Build image locally
+      # 🏗️ Step 2: Build Docker image from your Dockerfile
       - name: Build Docker image
         run: docker build -t local-secure-demo:latest .
 
-      # Scan the locally built image
+      # 🔍 Step 3: Scan Docker image using Trivy
       - name: Scan Docker image with Trivy
         uses: aquasecurity/trivy-action@master
         with:
@@ -30,7 +31,7 @@ jobs:
           exit-code: '0'
           severity: 'HIGH,CRITICAL'
 
-      # Optional: Push image to Docker Hub
+      # 🔐 Step 4: Log in to Docker Hub using GitHub Secrets
       - name: Log in to Docker Hub
         if: env.DOCKER_USERNAME != '' && env.DOCKER_PASSWORD != ''
         env:
@@ -38,6 +39,7 @@ jobs:
           DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
         run: echo "$DOCKER_PASSWORD" | docker login -u "$DOCKER_USERNAME" --password-stdin
 
+      # ☁️ Step 5: Tag and push image to Docker Hub
       - name: Tag and push image to Docker Hub
         if: env.DOCKER_USERNAME != '' && env.DOCKER_PASSWORD != ''
         env:
@@ -46,12 +48,14 @@ jobs:
           docker tag local-secure-demo:latest "$DOCKER_USERNAME/secure-demo:latest"
           docker push "$DOCKER_USERNAME/secure-demo:latest"
 
+      # 🪪 Step 6: Install Cosign for signing
       - name: Install Cosign
         run: |
           curl -sSL -o cosign https://github.com/sigstore/cosign/releases/latest/download/cosign-linux-amd64
           chmod +x cosign
           sudo mv cosign /usr/local/bin/
 
+      # ✍️ Step 7: Sign the image using keyless signing (GitHub OIDC)
       - name: Sign image with Cosign (keyless)
         if: env.DOCKER_USERNAME != '' && env.DOCKER_PASSWORD != ''
         env:
