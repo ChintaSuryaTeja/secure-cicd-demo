@@ -10,51 +10,74 @@ permissions:
   packages: write
 
 jobs:
-  build_scan_sign:
+  build_scan_push_sign:
     runs-on: ubuntu-latest
 
     steps:
+      # 1️⃣ Checkout the repo
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # Build image locally
-      - name: Build Docker image
-        run: docker build -t local-secure-demo:latest .
+      # 2️⃣ Set up Docker Buildx
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
 
-      # Scan the locally built image
+      # 3️⃣ Login to Docker Hub
+      - name: Docker Hub Login
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      # 4️⃣ Set image name and tags dynamically
+      - name: Define image metadata
+        id: meta
+        run: |
+          echo "IMAGE_NAME=docker.io/${{ secrets.DOCKER_USERNAME }}/secure-demo" >> $GITHUB_ENV
+          echo "SHA_TAG=$(echo $GITHUB_SHA | cut -c1-7)" >> $GITHUB_ENV
+          echo "DATE_TAG=$(date +'%Y%m%d%H%M')" >> $GITHUB_ENV
+          echo "LATEST_TAG=latest" >> $GITHUB_ENV
+
+      # 5️⃣ Build and push image with multiple tags
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ env.IMAGE_NAME }}:${{ env.SHA_TAG }}
+            ${{ env.IMAGE_NAME }}:${{ env.DATE_TAG }}
+            ${{ env.IMAGE_NAME }}:${{ env.LATEST_TAG }}
+
+      # 6️⃣ Scan pushed image using Trivy (more accurate)
       - name: Scan Docker image with Trivy
         uses: aquasecurity/trivy-action@master
         with:
-          image-ref: local-secure-demo:latest
-          format: table
+          image-ref: ${{ env.IMAGE_NAME }}:${{ env.SHA_TAG }}
+          format: 'table'
+          vuln-type: 'os,library'
+          ignore-unfixed: true
           exit-code: '0'
           severity: 'HIGH,CRITICAL'
 
-      # Optional: Push image to Docker Hub
-      - name: Log in to Docker Hub
-        if: env.DOCKER_USERNAME != '' && env.DOCKER_PASSWORD != ''
-        env:
-          DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
-          DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
-        run: echo "$DOCKER_PASSWORD" | docker login -u "$DOCKER_USERNAME" --password-stdin
-
-      - name: Tag and push image to Docker Hub
-        if: env.DOCKER_USERNAME != '' && env.DOCKER_PASSWORD != ''
-        env:
-          DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
-        run: |
-          docker tag local-secure-demo:latest "$DOCKER_USERNAME/secure-demo:latest"
-          docker push "$DOCKER_USERNAME/secure-demo:latest"
-
+      # 7️⃣ Install Cosign for signing
       - name: Install Cosign
-        run: |
-          curl -sSL -o cosign https://github.com/sigstore/cosign/releases/latest/download/cosign-linux-amd64
-          chmod +x cosign
-          sudo mv cosign /usr/local/bin/
+        uses: sigstore/cosign-installer@v3
 
-      - name: Sign image with Cosign (keyless)
-        if: env.DOCKER_USERNAME != '' && env.DOCKER_PASSWORD != ''
+      # 8️⃣ Sign image (keyless via OIDC)
+      - name: Sign Docker image with Cosign (keyless)
         env:
           COSIGN_EXPERIMENTAL: "true"
-          DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
-        run: cosign sign --yes "$DOCKER_USERNAME/secure-demo:latest"
+        run: |
+          for TAG in ${{ env.SHA_TAG }} ${{ env.DATE_TAG }} ${{ env.LATEST_TAG }}; do
+            cosign sign --yes ${{ env.IMAGE_NAME }}:$TAG
+          done
+
+      # 9️⃣ Verify signature (optional, for demonstration)
+      - name: Verify Docker image signature
+        run: |
+          for TAG in ${{ env.SHA_TAG }} ${{ env.DATE_TAG }} ${{ env.LATEST_TAG }}; do
+            cosign verify ${{ env.IMAGE_NAME }}:$TAG \
+              --certificate-identity-regexp ".*" \
+              --certificate-oidc-issuer-regexp "https://token.actions.githubusercontent.com"
+          done
