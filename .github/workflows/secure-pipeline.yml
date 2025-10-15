@@ -65,16 +65,7 @@ jobs:
             echo "Repository '${USER}/${REPO}' already exists ✅"
           fi
 
-      # 6️⃣ Tag and push the Docker image to Docker Hub
-      - name: Tag and push image to Docker Hub
-        if: env.DOCKER_USERNAME != '' && env.DOCKER_PASSWORD != ''
-        env:
-          DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
-        run: |
-          echo "Tagging image..."
-          docker tag local-secure-demo:latest "$DOCKER_USERNAME/secure-demo:latest"
-          echo "Pushing image..."
-          docker push "$DOCKER_USERNAME/secure-demo:latest"
+      
 
       # 7️⃣ Install Cosign
       - name: Install Cosign
@@ -83,13 +74,7 @@ jobs:
           chmod +x cosign
           sudo mv cosign /usr/local/bin/
 
-      # 8️⃣ Sign the pushed image (keyless)
-      - name: Sign image with Cosign (keyless)
-        if: env.DOCKER_USERNAME != '' && env.DOCKER_PASSWORD != ''
-        env:
-          COSIGN_EXPERIMENTAL: "true"
-          DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
-        run: cosign sign --yes "$DOCKER_USERNAME/secure-demo:latest"
+      
 
       # 9️⃣ Output final deployment info
       - name: Deployment Summary
