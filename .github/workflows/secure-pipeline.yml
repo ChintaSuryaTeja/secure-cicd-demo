@@ -14,12 +14,15 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      # 1️⃣ Checkout the repository
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      # 2️⃣ Build the Docker image locally
       - name: Build Docker image
         run: docker build -t local-secure-demo:latest .
 
+      # 3️⃣ Scan the locally built image with Trivy
       - name: Scan Docker image with Trivy
         uses: aquasecurity/trivy-action@master
         with:
@@ -28,6 +31,7 @@ jobs:
           exit-code: '0'
           severity: 'HIGH,CRITICAL'
 
+      # 4️⃣ Log in to Docker Hub
       - name: Log in to Docker Hub
         if: env.DOCKER_USERNAME != '' && env.DOCKER_PASSWORD != ''
         env:
@@ -35,46 +39,65 @@ jobs:
           DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
         run: echo "$DOCKER_PASSWORD" | docker login -u "$DOCKER_USERNAME" --password-stdin
 
-      # ✅ FIXED: Ensure Docker Hub repository exists safely
+      # 5️⃣ Ensure the Docker Hub repository exists (mask-safe)
       - name: Ensure repository exists on Docker Hub
         env:
           DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
           DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
         run: |
-          USER="$DOCKER_USERNAME"
+          set -e
+          USER="${DOCKER_USERNAME}"
           REPO="secure-demo"
-          echo "Checking if repository ${USER}/${REPO} exists..."
-          EXISTS=$(curl -s -o /dev/null -w "%{http_code}" -u "${USER}:${DOCKER_PASSWORD}" \
-            "https://hub.docker.com/v2/repositories/${USER}/${REPO}/")
 
-          if [ "$EXISTS" != "200" ]; then
-            echo "Repository not found. Creating..."
+          echo "Checking if repository '${USER}/${REPO}' exists..."
+
+          STATUS_CODE=$(curl -s -o response.txt -w "%{http_code}" -u "${USER}:${DOCKER_PASSWORD}" \
+            "https://hub.docker.com/v2/repositories/${USER}/${REPO}/" || true)
+
+          if [ "$STATUS_CODE" != "200" ]; then
+            echo "Repository not found (HTTP $STATUS_CODE). Creating..."
             curl -s -X POST -u "${USER}:${DOCKER_PASSWORD}" \
               https://hub.docker.com/v2/repositories/ \
               -H "Content-Type: application/json" \
-              -d "{\"name\": \"${REPO}\", \"is_private\": false}"
-            echo "Repository created ✅"
+              -d "{\"name\": \"${REPO}\", \"is_private\": false}" > /dev/null
+            echo "Repository '${USER}/${REPO}' created ✅"
           else
-            echo "Repository already exists ✅"
+            echo "Repository '${USER}/${REPO}' already exists ✅"
           fi
 
+      # 6️⃣ Tag and push the Docker image to Docker Hub
       - name: Tag and push image to Docker Hub
         if: env.DOCKER_USERNAME != '' && env.DOCKER_PASSWORD != ''
         env:
           DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
         run: |
+          echo "Tagging image..."
           docker tag local-secure-demo:latest "$DOCKER_USERNAME/secure-demo:latest"
+          echo "Pushing image..."
           docker push "$DOCKER_USERNAME/secure-demo:latest"
 
+      # 7️⃣ Install Cosign
       - name: Install Cosign
         run: |
           curl -sSL -o cosign https://github.com/sigstore/cosign/releases/latest/download/cosign-linux-amd64
           chmod +x cosign
           sudo mv cosign /usr/local/bin/
 
+      # 8️⃣ Sign the pushed image (keyless)
       - name: Sign image with Cosign (keyless)
         if: env.DOCKER_USERNAME != '' && env.DOCKER_PASSWORD != ''
         env:
           COSIGN_EXPERIMENTAL: "true"
           DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
         run: cosign sign --yes "$DOCKER_USERNAME/secure-demo:latest"
+
+      # 9️⃣ Output final deployment info
+      - name: Deployment Summary
+        env:
+          DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+        run: |
+          echo ""
+          echo "✅ CI/CD Pipeline completed successfully!"
+          echo "🔹 Docker Image: $DOCKER_USERNAME/secure-demo:latest"
+          echo "🔹 Docker Hub URL: https://hub.docker.com/r/$DOCKER_USERNAME/secure-demo"
+          echo ""
