@@ -14,15 +14,12 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # 1️⃣ Checkout the repository
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # 2️⃣ Build the Docker image
       - name: Build Docker image
         run: docker build -t local-secure-demo:latest .
 
-      # 3️⃣ Scan the locally built image with Trivy
       - name: Scan Docker image with Trivy
         uses: aquasecurity/trivy-action@master
         with:
@@ -31,7 +28,6 @@ jobs:
           exit-code: '0'
           severity: 'HIGH,CRITICAL'
 
-      # 4️⃣ Log in to Docker Hub
       - name: Log in to Docker Hub
         if: env.DOCKER_USERNAME != '' && env.DOCKER_PASSWORD != ''
         env:
@@ -39,44 +35,43 @@ jobs:
           DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
         run: echo "$DOCKER_PASSWORD" | docker login -u "$DOCKER_USERNAME" --password-stdin
 
-      # 5️⃣ Ensure Docker Hub repository exists (auto-create)
+      # ✅ FIXED: Ensure Docker Hub repository exists safely
       - name: Ensure repository exists on Docker Hub
         env:
           DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
           DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
         run: |
-          echo "Checking if repository '$DOCKER_USERNAME/secure-demo' exists..."
-          EXISTS=$(curl -s -o /dev/null -w "%{http_code}" -u "$DOCKER_USERNAME:$DOCKER_PASSWORD" \
-            https://hub.docker.com/v2/repositories/$DOCKER_USERNAME/secure-demo/)
+          USER="$DOCKER_USERNAME"
+          REPO="secure-demo"
+          echo "Checking if repository ${USER}/${REPO} exists..."
+          EXISTS=$(curl -s -o /dev/null -w "%{http_code}" -u "${USER}:${DOCKER_PASSWORD}" \
+            "https://hub.docker.com/v2/repositories/${USER}/${REPO}/")
+
           if [ "$EXISTS" != "200" ]; then
-            echo "Repository not found. Creating it..."
-            curl -s -X POST -u "$DOCKER_USERNAME:$DOCKER_PASSWORD" \
+            echo "Repository not found. Creating..."
+            curl -s -X POST -u "${USER}:${DOCKER_PASSWORD}" \
               https://hub.docker.com/v2/repositories/ \
               -H "Content-Type: application/json" \
-              -d "{\"name\": \"secure-demo\", \"is_private\": false}"
+              -d "{\"name\": \"${REPO}\", \"is_private\": false}"
+            echo "Repository created ✅"
           else
             echo "Repository already exists ✅"
           fi
 
-      # 6️⃣ Tag and push the Docker image
       - name: Tag and push image to Docker Hub
         if: env.DOCKER_USERNAME != '' && env.DOCKER_PASSWORD != ''
         env:
           DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
         run: |
-          echo "Tagging image..."
           docker tag local-secure-demo:latest "$DOCKER_USERNAME/secure-demo:latest"
-          echo "Pushing image..."
           docker push "$DOCKER_USERNAME/secure-demo:latest"
 
-      # 7️⃣ Install Cosign
       - name: Install Cosign
         run: |
           curl -sSL -o cosign https://github.com/sigstore/cosign/releases/latest/download/cosign-linux-amd64
           chmod +x cosign
           sudo mv cosign /usr/local/bin/
 
-      # 8️⃣ Sign image with Cosign (keyless)
       - name: Sign image with Cosign (keyless)
         if: env.DOCKER_USERNAME != '' && env.DOCKER_PASSWORD != ''
         env:
