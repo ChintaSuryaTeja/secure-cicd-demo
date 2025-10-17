@@ -10,79 +10,64 @@ permissions:
   packages: write
 
 jobs:
-  build_scan_sign:
+  build_scan_push:
     runs-on: ubuntu-latest
 
     steps:
-      # 1️⃣ Checkout the repository
+      # 1️⃣ Checkout code
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # 2️⃣ Build the Docker image locally
+      # 2️⃣ Build Docker image
       - name: Build Docker image
         run: docker build -t local-secure-demo:latest .
 
-      # 3️⃣ Scan the locally built image with Trivy
+      # 3️⃣ Scan image BEFORE pushing
       - name: Scan Docker image with Trivy
         uses: aquasecurity/trivy-action@master
         with:
           image-ref: local-secure-demo:latest
           format: table
-          exit-code: '0'
+          exit-code: '0'        # Use '1' if you want to fail on vulnerabilities
           severity: 'HIGH,CRITICAL'
 
-      # 4️⃣ Log in to Docker Hub
+      # 4️⃣ Login only if scan is OK
       - name: Log in to Docker Hub
-        if: env.DOCKER_USERNAME != '' && env.DOCKER_PASSWORD != ''
         env:
           DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
           DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
         run: echo "$DOCKER_PASSWORD" | docker login -u "$DOCKER_USERNAME" --password-stdin
 
-      # 5️⃣ Ensure the Docker Hub repository exists (mask-safe)
-      - name: Ensure repository exists on Docker Hub
+      # 5️⃣ Ensure repository exists
+      - name: Ensure Docker Hub repository exists
         env:
           DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
           DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
         run: |
-          set -e
           USER="${DOCKER_USERNAME}"
           REPO="secure-demo"
-
-          echo "Checking if repository '${USER}/${REPO}' exists..."
-
           STATUS_CODE=$(curl -s -o response.txt -w "%{http_code}" -u "${USER}:${DOCKER_PASSWORD}" \
             "https://hub.docker.com/v2/repositories/${USER}/${REPO}/" || true)
-
           if [ "$STATUS_CODE" != "200" ]; then
-            echo "Repository not found (HTTP $STATUS_CODE). Creating..."
+            echo "Repository not found. Creating..."
             curl -s -X POST -u "${USER}:${DOCKER_PASSWORD}" \
               https://hub.docker.com/v2/repositories/ \
               -H "Content-Type: application/json" \
               -d "{\"name\": \"${REPO}\", \"is_private\": false}" > /dev/null
-            echo "Repository '${USER}/${REPO}' created ✅"
-          else
-            echo "Repository '${USER}/${REPO}' already exists ✅"
           fi
 
-      
-
-      # 7️⃣ Install Cosign
-      - name: Install Cosign
+      # 6️⃣ Push image to Docker Hub
+      - name: Tag and push image to Docker Hub
+        env:
+          DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
         run: |
-          curl -sSL -o cosign https://github.com/sigstore/cosign/releases/latest/download/cosign-linux-amd64
-          chmod +x cosign
-          sudo mv cosign /usr/local/bin/
+          docker tag local-secure-demo:latest "$DOCKER_USERNAME/secure-demo:latest"
+          docker push "$DOCKER_USERNAME/secure-demo:latest"
 
-      
-
-      # 9️⃣ Output final deployment info
+      # 7️⃣ Deployment summary
       - name: Deployment Summary
         env:
           DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
         run: |
-          echo ""
-          echo "✅ CI/CD Pipeline completed successfully!"
-          echo "🔹 Docker Image: $DOCKER_USERNAME/secure-demo:latest"
-          echo "🔹 Docker Hub URL: https://hub.docker.com/r/$DOCKER_USERNAME/secure-demo"
-          echo ""
+          echo "✅ Secure CI/CD pipeline completed successfully!"
+          echo "🔹 Image pushed: $DOCKER_USERNAME/secure-demo:latest"
