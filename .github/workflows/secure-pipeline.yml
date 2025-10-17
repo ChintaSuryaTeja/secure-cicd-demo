@@ -80,14 +80,10 @@ jobs:
           docker tag local-secure-demo:latest "$CLEAN_USERNAME/secure-demo:latest"
           docker push "$CLEAN_USERNAME/secure-demo:latest"
 
-      # 7️⃣ Install Cosign (optional, currently not used)
-      - name: Install Cosign
-        run: |
-          curl -sSL -o cosign https://github.com/sigstore/cosign/releases/latest/download/cosign-linux-amd64
-          chmod +x cosign
-          sudo mv cosign /usr/local/bin/
+      
+      
 
-      # 8️⃣ Output final deployment info
+      # 7 Output final deployment info
       - name: Deployment Summary
         env:
           DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
