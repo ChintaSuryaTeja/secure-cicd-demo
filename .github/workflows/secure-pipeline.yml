@@ -14,60 +14,86 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # 1️⃣ Checkout code
+      # 1️⃣ Checkout the repository
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # 2️⃣ Build Docker image
+      # 2️⃣ Build the Docker image
       - name: Build Docker image
         run: docker build -t local-secure-demo:latest .
 
-      # 3️⃣ Scan image BEFORE pushing
+      # 3️⃣ Scan image for vulnerabilities with Trivy
       - name: Scan Docker image with Trivy
         uses: aquasecurity/trivy-action@master
         with:
           image-ref: local-secure-demo:latest
           format: table
-          exit-code: '0'        # Use '1' if you want to fail on vulnerabilities
+          exit-code: '0'       # Change to '1' to fail build if vulnerabilities found
           severity: 'HIGH,CRITICAL'
 
-      # 4️⃣ Login only if scan is OK
+      # 4️⃣ Log in to Docker Hub securely using GitHub Secrets
       - name: Log in to Docker Hub
         env:
           DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
           DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
-        run: echo "$DOCKER_PASSWORD" | docker login -u "$DOCKER_USERNAME" --password-stdin
+        run: |
+          echo "$DOCKER_PASSWORD" | docker login -u "$DOCKER_USERNAME" --password-stdin
+          echo "DOCKER_USERNAME=$DOCKER_USERNAME" >> $GITHUB_ENV
+          echo "DOCKER_PASSWORD=$DOCKER_PASSWORD" >> $GITHUB_ENV
 
-      # 5️⃣ Ensure repository exists
-      - name: Ensure Docker Hub repository exists
+      # 5️⃣ Ensure Docker Hub repository exists (mask-safe)
+      - name: Ensure repository exists on Docker Hub
         env:
           DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
           DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
         run: |
+          set -e
           USER="${DOCKER_USERNAME}"
           REPO="secure-demo"
+
+          echo "Checking if repository '${USER}/${REPO}' exists..."
+
           STATUS_CODE=$(curl -s -o response.txt -w "%{http_code}" -u "${USER}:${DOCKER_PASSWORD}" \
             "https://hub.docker.com/v2/repositories/${USER}/${REPO}/" || true)
+
           if [ "$STATUS_CODE" != "200" ]; then
-            echo "Repository not found. Creating..."
+            echo "Repository not found (HTTP $STATUS_CODE). Creating..."
             curl -s -X POST -u "${USER}:${DOCKER_PASSWORD}" \
               https://hub.docker.com/v2/repositories/ \
               -H "Content-Type: application/json" \
               -d "{\"name\": \"${REPO}\", \"is_private\": false}" > /dev/null
+            echo "Repository '${USER}/${REPO}' created ✅"
+          else
+            echo "Repository '${USER}/${REPO}' already exists ✅"
           fi
 
-      # 6️⃣ Push image to Docker Hub
+      # 6️⃣ Tag and Push the image (with newline fix)
       - name: Tag and push image to Docker Hub
         env:
           DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
         run: |
-          docker tag local-secure-demo:latest "$DOCKER_USERNAME/secure-demo:latest"
-          docker push "$DOCKER_USERNAME/secure-demo:latest"
+          # Clean username to remove hidden newline/spaces
+          CLEAN_USERNAME=$(echo "$DOCKER_USERNAME" | tr -d '\n' | tr -d '\r' | tr -d ' ')
+          echo "Using Docker Hub username: $CLEAN_USERNAME"
 
-      # 7️⃣ Deployment summary
+          # Tag and push the image safely
+          docker tag local-secure-demo:latest "$CLEAN_USERNAME/secure-demo:latest"
+          docker push "$CLEAN_USERNAME/secure-demo:latest"
+
+      # 7️⃣ Install Cosign (optional, currently not used)
+      - name: Install Cosign
+        run: |
+          curl -sSL -o cosign https://github.com/sigstore/cosign/releases/latest/download/cosign-linux-amd64
+          chmod +x cosign
+          sudo mv cosign /usr/local/bin/
+
+      # 8️⃣ Output final deployment info
       - name: Deployment Summary
         env:
           DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
         run: |
-          echo "✅ Secure CI/CD pipeline completed successfully!"
-          echo "🔹 Image pushed: $DOCKER_USERNAME/secure-demo:latest"
+          echo ""
+          echo "✅ Secure CI/CD Pipeline completed successfully!"
+          echo "🔹 Docker Image: $DOCKER_USERNAME/secure-demo:latest"
+          echo "🔹 Docker Hub URL: https://hub.docker.com/r/$DOCKER_USERNAME/secure-demo"
+          echo ""
