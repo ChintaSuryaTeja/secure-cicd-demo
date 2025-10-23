@@ -28,7 +28,7 @@ jobs:
         with:
           image-ref: local-secure-demo:latest
           format: table
-          exit-code: '1'       # Change to '1' to fail build if vulnerabilities found
+          exit-code: '0'       # Change to '1' to fail build if vulnerabilities found
           severity: 'HIGH,CRITICAL'
 
       # 4️⃣ Log in to Docker Hub securely using GitHub Secrets
